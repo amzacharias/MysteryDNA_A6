@@ -1,0 +1,164 @@
+---
+title: "MysteryDNA_A6"
+author: "Amanda Zacharias"
+date: "2/26/2021"
+output: html_document
+---
+
+# Project Info
+
+**Date**: February 26th, 2021
+**GitHub Repository Link**: [link](https://github.com/ForgetfulCow/MysteryDNA_A6)
+**Username**: ForgetfulCow
+
+# Loading Packages
+
+```{r include = F}
+library(annotate)
+library(ape)
+library(ggplot2)
+library(reshape2)
+library(ggtree)
+```
+
+# Load Data
+
+Save the sequence from the assigment instructions as a string called "Mystery".
+
+```{r}
+Mystery <- "ATGTCTGATAATGGACCCCAAAATCAGCGAAATGCACCCCGCATTACGTTTGGTGGACCCTCAGATTCAACTGGCAGTAACCAGAATGGAGAACGCAGTGGGGCGCGATCAAAACAACGTCGGCCCCAAGGTTTACCCAATAATACTGCGTCTTGGTTCACCGCTCTCACTCAACATGGCAAGGAAGACCTTAAATTCCCTCGAGGACAAGGCGTTCCAATTAACACCAATAGCAGTCCAGATGACCAAATTGGCTACTACCGAAGAGCTACCAGACGAATTCGTGGTGGTGACGGTAAAATGAAAGATCTCAGTCCAAGATGGTATTTCTACTACCTAGGAACTGGGCCAGAAGCTGGACTTCCCTATGGTGCTAACAAAGACGGCATCATATGGGTTGCAACTGAGGGAGCCTTGAATACACCAAAAGATCACATTGGCACCCGCAATCCTGCTAACAATGCTGCAATCGTGCTACAACTTCCTCAAGGAACAACATTGCCAAAAGGCTTCTACGCAGAAGGGAGCAGAGGCGGCAGTCAAGCCTCTTCTCGTTCCTCATCACGTAGTCGCAACAGTTCAAGAAATTCAACTCCAGGCAGCAGTAGGGGAACTTCTCCTGCTAGAATGGCTGGCAATGGCGGTGATGCTGCTCTTGCTTTGCTGCTGCTTGACAGATTGAACCAGCTTGAGAGCAAAATGTCTGGTAAAGGCCAACAACAACAAGGCCAAACTGTCACTAAGAAATCTGCTGCTGAGGCTTCTAAGAAGCCTCGGCAAAAACGTACTGCCACTAAAGCATACAATGTAACACAAGCTTTCGGCAGACGTGGTCCAGAACAAACCCAAGGAAATTTTGGGGACCAGGAACTAATCAGACAAGGAACTGATTACAAACATTGGCCGCAAATTGCACAATTTGCCCCCAGCGCTTCAGCGTTCTTCGGAATGTCGCGCATTGGCATGGAAGTCACACCTTCGGGAACGTGGTTGACCTACACAGGTGCCATCAAATTGGATGACAAAGATCCAAATTTCAAAGATCAAGTCATTTTGCTGAATAAGCATATTGACGCATACAAAACATTCCCACCAACAGAGCCTAAAAAGGACAAAAAGAAGAAGGCTGATGAAACTCAAGCCTTACCGCAGAGACAGAAGAAACAGCAAACTGTGACTCTTCTTCCTGCTGCAGATTTGGATGATTTCTCCAAACAATTGCAACAATCCATGAGCAGTGCTGACTCAACTCAGGCCTAA"
+```
+
+# BLAST the Sequence
+
+```{r}
+MysteryBLAST <- blastSequences(paste(Mystery), as = "data.frame", hitListSize = "40",
+                               database = "nt")
+```
+
+# Look at BLAST results
+
+Make a vector of accession numbers from the BLAST results and put them in a `data.frame` object with two columns: 1) accession ID, 2) sequence
+
+```{r}
+MysteryHitsDF <- data.frame(ID=MysteryBLAST$Hit_accession,Seq=MysteryBLAST$Hsp_hseq,
+                     stringsAsFactors = FALSE)
+head(MysteryHitsDF)
+```
+
+# Use `read.GenBank()` to read in the hits' sequences from GenBank. Doing all 40 hits, so could take a while.
+
+```{r}
+MysterySeqs<-read.GenBank(MysteryBLAST$Hit_accession)
+```
+
+# Look at species ~ is the DNA isolate human? 
+
+```{r}
+attr(MysterySeqs,"species")
+```
+
+The isolate is probably coronavirus, not human! 
+
+# Aligning the sequences with MUSCLE, an alignment program
+
+ Decision: align entire sequence of hits or only align portion that aligns with the query?
+ - Because I want a detailed understanding of the similarities and differences between the sequences, I will be aligned the entire sequence of hits, not just the matching portion.
+ 
+ \n
+ 
+Convert MysterySeqs object to a format that can be input 
+
+1. Convert `MysterySeqs` object to a `character vector`
+2. Convert `character vector` to a `DNAbin` object
+
+```{r}
+MysteryDNA <-as.DNAbin(as.character(MysterySeqs))
+```
+
+Run `muscle()` on our `DNAbin` object
+
+```{r}
+MysteryAlign <- muscle(MysteryDNA, quiet = F)
+```
+
+# Inspect the Alignment
+
+```{r}
+checkAlignment(MysteryAlign, what=1)
+```
+
+# Are there sequences with too many gaps? 
+
+```{r}
+SeqLen<-as.numeric(lapply(MysteryDNA,length))
+qplot(SeqLen)
+```
+
+There is only one segment that is 100 - 200 base pairs shorter than the other sequences, so it doesn't seem necessary to create a subset that excludes that segment. Also, `checkalignment()` doesn't show many gaps, so the alignment is probably reasonable. 
+
+# Distance matrix 
+
+Use the `dist.dna()` function to estimate the pairwise distance matrix from the sequence data. using the K80 model.
+
+```{r}
+MysteryDM <- dist.dna(MysteryAlign, model = "K80")
+```
+
+Rearrange the matrix to a linear matrix using `melt()`.
+
+```{r}
+MysteryDMmat <- as.matrix(MysteryDM)
+PDat <- melt(MysteryDMmat)
+```
+
+Use ggplot to plot the matrix 
+
+> `png()` and `dev.off()` are used to save figures as png images
+
+```{r}
+png(file = "OutputData/matrix.png")
+ggplot(data = PDat, aes(x=Var1, y=Var2, fill=value)) + 
+        geom_tile() +
+        scale_fill_gradientn(colours = c("white","blue","green","red")) + 
+        theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+dev.off()
+```
+
+Across the sequences, the pairwise distance values seem very small, so I don't think it's necessary to remove any. The sequences that do have larger values don't seem to majorly obscure our observation of variation among other sequences. 
+
+# Tree building
+
+Using the Neighbour-Joining (NJ) approach
+
+```{r}
+MysteryTree <- nj(MysteryDM)
+```
+
+Plot the phylogenetic tree with `ggtree()`. `geom_tiplab()` adds the sequence IDs to the tips. 
+
+```{r}
+png(file = "OutputData/phylodist.png")
+ggtree(MysteryTree) + 
+        geom_tiplab(size = 3)
+dev.off()
+```
+
+Seem to be able to see all the sequences and their relationships well. It might be nice to see the relationships closer to the node. Accomplish this by removing branch length.
+
+```{r}
+png(file = "OutputData/phylonode.png")
+ggtree(MysteryTree, branch.length = "none") + 
+        geom_tiplab(size = 3)
+dev.off()
+```
+
+Try a circular phylogeny
+
+```{r}
+ggtree(MysteryTree,layout="circular") + 
+         geom_tiplab(size = 3)
+```
+
+Don't really like the circular phylogeny - looks messy with everything smooshed together.
+
